@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1793205509128,
+      "tag": "0000_clammy_whiplash",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1793205686354,
+      "tag": "0001_dear_scalphunter",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793366051717,
+      "tag": "0002_printer_interface_schema",
+      "breakpoints": true
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+@import "tailwindcss";
+
+/*
+ * Brand colours seeded from design-system/Presswise - Design System.md.
+ * The design system feature owns the full token set; these are only the
+ * values the scaffold page needs.
+ */
+@theme {
+  --color-surface: #ffffff;
+  --color-ink: #0b1b14;
+  --color-brand: #0f9d6b;
+  --color-lime: #8bd450;
+  --color-amber: #d97706;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-surface);
+  color: var(--color-ink);
+}

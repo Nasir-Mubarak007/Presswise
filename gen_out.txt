@@ -1,0 +1,2 @@
+﻿No config path provided, using default 'drizzle.config.ts'
+Reading config file 'C:\Users\DEVLORD\Desktop\Presswise\drizzle.config.ts'
