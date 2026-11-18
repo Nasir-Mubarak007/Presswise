@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { isPrinterExperienceEnabled } from "@/lib/printer-gate";
+import { getPublicObjectUrl } from "@/lib/storage/r2";
 import { getPublishedShop } from "@/lib/services/printer-service";
 
 export async function generateMetadata({
@@ -8,6 +9,12 @@ export async function generateMetadata({
 }: {
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
+  if (!isPrinterExperienceEnabled()) {
+    return {
+      title: "Shop not found · Presswise",
+      robots: { index: false, follow: false },
+    };
+  }
   const { slug } = await params;
   const shop = await getPublishedShop(slug);
   if (!shop) {
@@ -35,7 +42,7 @@ export default async function ShopPage({
   }
 
   const imageUrl = (key: string | null): string | undefined =>
-    key ? `${process.env.R2_PUBLIC_URL ?? ""}/${key}` : undefined;
+    key ? getPublicObjectUrl(key) : undefined;
 
   return (
     <main className="min-h-dvh bg-surface text-ink">

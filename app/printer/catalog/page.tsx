@@ -2,6 +2,7 @@ import PrinterDashboardShell from "@/components/printer-dashboard-shell";
 import { requireDashboardAccess } from "@/lib/printer-dashboard";
 import { listShopProducts } from "@/lib/services/printer-service";
 import { formatMoney } from "@/lib/format-money";
+import { getPublicObjectUrl } from "@/lib/storage/r2";
 
 const STATUS_TABS: { key: string | null; label: string }[] = [
   { key: null, label: "All" },
@@ -33,7 +34,7 @@ export default async function CatalogPage({
   });
 
   const imageUrl = (key: string | null): string | undefined =>
-    key ? `${process.env.R2_PUBLIC_URL ?? ""}/${key}` : undefined;
+    key ? getPublicObjectUrl(key) : undefined;
 
   return (
     <PrinterDashboardShell
@@ -46,7 +47,7 @@ export default async function CatalogPage({
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Catalog</h1>
             <p className="mt-1 text-ink/60">
-              Manage your shop's products. {isWriter ? "Owners and managers can add or edit products." : "Staff can view the catalog."}
+              Manage your shop&apos;s products. {isWriter ? "Owners and managers can add or edit products." : "Staff can view the catalog."}
             </p>
           </div>
         </header>

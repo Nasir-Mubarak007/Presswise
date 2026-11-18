@@ -8,9 +8,9 @@ This repository holds only docs and the skill set; the application code lives on
 
 ## Options considered
 
-### Option 1: The chosen stack (Next.js, Neon, Drizzle, Better Auth, R2, Resend, Vercel, Railway, Paystack)
+### Option 1: The chosen stack (Next.js, Neon, Drizzle, Better Auth, Backblaze B2, Resend, Vercel, Railway, Paystack)
 
-A single Next.js 16 web app using TypeScript and the App Router. Data lives in Neon Postgres, queried through Drizzle ORM. Accounts use Better Auth with its organization plugin for printer companies and employees. Files go to Cloudflare R2 through signed upload URLs. Email goes through Resend. Payments use Paystack subaccounts with split payments. The app runs on Vercel. Background jobs run on BullMQ with Redis on Railway. Rate limiting uses Upstash. Errors go to Sentry and funnels to PostHog.
+A single Next.js 16 web app using TypeScript and the App Router. Data lives in Neon Postgres, queried through Drizzle ORM. Accounts use Better Auth with its organization plugin for printer companies and employees. Files go to one private Backblaze B2 bucket through S3 compatible signed upload URLs. Application routes check publication or shop membership before serving image bytes. Email goes through Resend. Payments use Paystack subaccounts with split payments. The app runs on Vercel. Background jobs run on BullMQ with Redis on Railway. Rate limiting uses Upstash. Errors go to Sentry and funnels to PostHog.
 
 **Pros**:
 - One person can build and operate it; every tool is managed or serverless with scale to zero.
@@ -19,7 +19,7 @@ A single Next.js 16 web app using TypeScript and the App Router. Data lives in N
 - Paystack subaccounts with split payments settle the printer's share automatically.
 
 **Cons**:
-- Multiple managed services to keep track of (Neon, R2, Resend, Paystack, Railway, Upstash, Sentry, PostHog).
+- Multiple managed services to keep track of (Neon, B2, Resend, Paystack, Railway, Upstash, Sentry, PostHog).
 - Vercel functions have cold starts and short execution limits, fine for web requests but not for long running print file generation (that goes to the Railway worker).
 - Better Auth is younger than some alternatives, so security upkeep is on the team.
 
@@ -52,7 +52,7 @@ A Google platform stack with NoSQL document storage, authentication, file storag
 
 ## Rationale
 
-The solo builder needs the fewest moving parts to operate, which favors managed services with scale to zero over self hosting anything. A relational database is the right default because the domain has clear relationships (orders contain items, items belong to products and variants, customers belong to printers, payments split to subaccounts); Neon Postgres gives ACID guarantees and constraints that a document database would not. Better Auth organizations map directly to the printer company model (admin plus optional employees), which the roadmap already decided. Paystack subaccounts with split payments settle the printer's share automatically, matching the flat transaction fee revenue model. Vercel keeps hosting simple for one person; Railway adds only Redis and BullMQ for background jobs, nothing more. Every outside service sits behind an interface with an in memory twin, so most code can be tested without any account, which matters because the builder works in demo mode much of the time. (basis: boring technology principle, monolith first pattern, relational database default, interface with in memory twin pattern)
+The solo builder needs the fewest moving parts to operate, which favors managed services with scale to zero over self hosting anything. A relational database is the right default because the domain has clear relationships (orders contain items, items belong to products and variants, customers belong to printers, payments split to subaccounts); Neon Postgres gives ACID guarantees and constraints that a document database would not. Better Auth organizations map directly to the printer company model (admin plus optional employees), which the roadmap already decided. Paystack subaccounts with split payments settle the printer's share automatically, matching the flat transaction fee revenue model. Vercel keeps hosting simple for one person; Railway adds only Redis and BullMQ for background jobs, nothing more. Backblaze B2 replaces R2 because the user already has B2 credentials, chose one private bucket, and wants to start on its free tier. Keeping that bucket private means customer images must pass through application routes that check current publication state, and printer previews must pass shop membership checks. This avoids separate public storage and credentials, at the cost of application bandwidth, B2 transfer use, and image response latency. The free tier reduces early storage cost, but its transfer and transaction allowances must be checked before launch. Every outside service sits behind an interface with an in memory twin, so most code can be tested without any account, which matters because the builder works in demo mode much of the time. (basis: boring technology principle, monolith first pattern, relational database default, interface with in memory twin pattern, confirmed B2 account and private bucket choice, Backblaze B2 S3 compatible API and pricing)
 
 ## References
 
@@ -75,8 +75,7 @@ The solo builder needs the fewest moving parts to operate, which favors managed 
 - Drizzle ORM agent skill: https://llmbase.ai/skills/oakoss/drizzle-orm/
 - Better Auth skills: https://github.com/better-auth/skills/blob/main/better-auth/best-practices/SKILL.md
 - Better Auth MCP server: https://better-auth.com/docs/ai-resources/mcp
-- Cloudflare skills: https://github.com/cloudflare/skills
-- Cloudflare MCP servers: https://developers.cloudflare.com/agents/model-context-protocol/cloudflare/servers-for-cloudflare/
+- Backblaze B2 provides the selected S3 compatible private object storage. The existing AWS SDK S3 client can be reused.
 - Resend MCP server: https://resend.com/docs/mcp-server
 - Resend agent skills: https://github.com/resend/resend-skills
 - Vercel MCP server: https://vercel.com/docs/agent-resources/vercel-mcp

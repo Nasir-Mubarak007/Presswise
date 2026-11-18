@@ -1,5 +1,5 @@
 import { db } from "@/lib/db/client";
-import { and, count, desc, eq, gte, gt, inArray, isNotNull, lt, or, ilike, sql, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, gte, inArray, lt, or, ilike, sql, type SQL } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import {
   member,
@@ -24,48 +24,14 @@ import {
 import { logger } from "@/lib/log/logger";
 import { createRefund, fetchRefund, isPaystackConfigured } from "@/lib/paystack";
 import { err, ok, type Result, type AppError } from "@/lib/domain/result";
+import { NIGERIAN_STATES } from "@/lib/domain/nigerian-states";
+export { NIGERIAN_STATES } from "@/lib/domain/nigerian-states";
+import {
+  requestShopPublication,
+  type TransitionRequest,
+} from "@/lib/services/printer-publication-service";
 
 export type PrinterError = AppError & { fields?: Record<string, string> };
-
-export const NIGERIAN_STATES = [
-  "Abia",
-  "Adamawa",
-  "Akwa Ibom",
-  "Anambra",
-  "Bauchi",
-  "Bayelsa",
-  "Benue",
-  "Borno",
-  "Cross River",
-  "Delta",
-  "Ebonyi",
-  "Edo",
-  "Ekiti",
-  "Enugu",
-  "Gombe",
-  "Imo",
-  "Jigawa",
-  "Kaduna",
-  "Kano",
-  "Katsina",
-  "Kebbi",
-  "Kogi",
-  "Kwara",
-  "Lagos",
-  "Nasarawa",
-  "Niger",
-  "Ogun",
-  "Ondo",
-  "Osun",
-  "Oyo",
-  "Plateau",
-  "Rivers",
-  "Sokoto",
-  "Taraba",
-  "Yobe",
-  "Zamfara",
-  "FCT",
-];
 
 function normalizeSlug(slug: string): string {
   return slug.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -89,7 +55,7 @@ export async function createDraftShop(input: CreateShopInput): Promise<CreateSho
   if (!name.trim() || !slug) {
     return err({ code: "shop.invalid_input", message: "Shop name and slug are required." });
   }
-  if (!NIGERIAN_STATES.includes(state)) {
+  if (!NIGERIAN_STATES.some((knownState) => knownState === state)) {
     return err({ code: "shop.invalid_state", message: "State must be a Nigerian state or the FCT." });
   }
   if (!city.trim()) {
@@ -154,84 +120,10 @@ export async function createDraftShop(input: CreateShopInput): Promise<CreateSho
 }
 
 export type PublishShopInput = { shopId: string; actorUserId: string };
-export type PublishShopResult = Result<void, PrinterError>;
+export type PublishShopResult = Result<TransitionRequest, PrinterError>;
 
 export async function publishShop(input: PublishShopInput): Promise<PublishShopResult> {
-  const { shopId, actorUserId } = input;
-
-  const [membership] = await db
-    .select()
-    .from(shopMembership)
-    .where(
-      and(
-        eq(shopMembership.shopId, shopId),
-        eq(shopMembership.userId, actorUserId),
-        eq(shopMembership.status, "active"),
-      ),
-    )
-    .limit(1);
-  if (!membership || membership.role !== "owner") {
-    return err({ code: "shop.forbidden", message: "Only the shop owner can publish." });
-  }
-
-  const [shop] = await db.select().from(printerShop).where(eq(printerShop.id, shopId)).limit(1);
-  if (!shop) {
-    return err({ code: "shop.not_found", message: "Shop not found." });
-  }
-  if (shop.status === "suspended") {
-    return err({ code: "shop.suspended", message: "A suspended shop cannot be published." });
-  }
-
-  const missing: string[] = [];
-  if (!shop.name?.trim()) missing.push("shop name");
-  if (!NIGERIAN_STATES.includes(shop.state)) missing.push("state");
-  if (!shop.city?.trim()) missing.push("city");
-
-  const [readyVariant] = await db
-    .select({ productId: products.id })
-    .from(products)
-    .innerJoin(productVariants, eq(productVariants.productId, products.id))
-    .leftJoin(productImages, and(eq(productImages.productId, products.id), eq(productImages.sortOrder, 0)))
-    .where(
-      and(
-        eq(products.shopId, shopId),
-        eq(products.status, "published"),
-        sql`${products.basePriceKobo} > 0`,
-        isNotNull(productImages.id),
-      ),
-    )
-    .limit(1);
-  if (!readyVariant) missing.push("a published priced product variant with a material, a finish, and a cover photo");
-
-  if (missing.length > 0) {
-    return err({
-      code: "shop.not_ready_for_publication",
-      message: "Publish blocked: " + missing.join(", ") + ".",
-      fields: Object.fromEntries(missing.map((field) => [field, "required"])),
-    });
-  }
-
-  try {
-    await db.transaction(async (tx) => {
-      await tx
-        .update(printerShop)
-        .set({ status: "published", updatedAt: new Date() })
-        .where(eq(printerShop.id, shopId));
-      await tx.insert(auditEvent).values({
-        id: uuidv4(),
-        actorUserId,
-        targetType: "shop",
-        targetId: shopId,
-        action: "shop.publish",
-        detailsJson: null,
-      });
-    });
-    logger.info("shop.published", { event: "shop.published", shopId, slug: shop.slug });
-    return ok(undefined);
-  } catch (error) {
-    logger.error("shop.publish_failed", { event: "shop.publish_failed", error: String(error) });
-    return err({ code: "shop.publish_failed", message: "Could not publish shop." });
-  }
+  return requestShopPublication(input);
 }
 
 export type ShopCard = {
@@ -256,7 +148,12 @@ export async function listPublishedShops(): Promise<ShopCard[]> {
       area: printerShop.area,
     })
     .from(printerShop)
-    .where(eq(printerShop.status, "published"))
+    .where(
+      and(
+        eq(printerShop.status, "published"),
+        eq(printerShop.visibilityTransition, false),
+      ),
+    )
     .orderBy(printerShop.name);
 
   return rows;
@@ -285,32 +182,63 @@ export async function getPublishedShop(slug: string): Promise<{ shop: ShopCard; 
   const [shop] = await db
     .select()
     .from(printerShop)
-    .where(and(eq(printerShop.slug, slug), eq(printerShop.status, "published")))
+    .where(
+      and(
+        eq(printerShop.slug, slug),
+        eq(printerShop.status, "published"),
+        eq(printerShop.visibilityTransition, false),
+      ),
+    )
     .limit(1);
   if (!shop) return null;
 
   const productRows = await db
     .select()
     .from(products)
-    .where(and(eq(products.shopId, shop.id), eq(products.status, "published")))
+    .where(
+      and(
+        eq(products.shopId, shop.id),
+        eq(products.status, "published"),
+        eq(products.visibilityTransition, false),
+      ),
+    )
     .orderBy(products.createdAt);
 
   if (productRows.length === 0) {
     return { shop: mapShop(shop), products: [] };
   }
 
-  const productIds = productRows.map((p) => p.id);
+  const imageRows = await db
+    .select({
+      id: productImages.id,
+      productId: productImages.productId,
+      publicObjectKey: productImages.publicObjectKey,
+      altText: productImages.altText,
+      sortOrder: productImages.sortOrder,
+    })
+    .from(productImages)
+    .where(inArray(productImages.productId, productRows.map((product) => product.id)))
+    .orderBy(productImages.sortOrder);
+  const visibleProductRows = productRows.filter((product) =>
+    imageRows.some(
+      (image) =>
+        image.productId === product.id &&
+        image.sortOrder === 0 &&
+        image.publicObjectKey !== null,
+    ),
+  );
+  if (visibleProductRows.length === 0) {
+    return { shop: mapShop(shop), products: [] };
+  }
 
+  const visibleProductIds = visibleProductRows.map((product) => product.id);
   const variantRows = await db
     .select()
     .from(productVariants)
-    .where(inArray(productVariants.productId, productIds));
-
-  const imageRows = await db
-    .select()
-    .from(productImages)
-    .where(inArray(productImages.productId, productIds))
-    .orderBy(productImages.sortOrder);
+    .where(inArray(productVariants.productId, visibleProductIds));
+  const visibleImageRows = imageRows.filter((image) =>
+    visibleProductIds.includes(image.productId),
+  );
 
   const variantsByProduct = new Map<string, typeof variantRows>();
   for (const row of variantRows) {
@@ -319,16 +247,16 @@ export async function getPublishedShop(slug: string): Promise<{ shop: ShopCard; 
     else variantsByProduct.set(row.productId, [row]);
   }
 
-  const coverByProduct = new Map<string, typeof imageRows[number] | undefined>();
-  for (const row of imageRows) {
-    if (!coverByProduct.has(row.productId)) {
+  const coverByProduct = new Map<string, (typeof visibleImageRows)[number]>();
+  for (const row of visibleImageRows) {
+    if (row.sortOrder === 0 && row.publicObjectKey && !coverByProduct.has(row.productId)) {
       coverByProduct.set(row.productId, row);
     }
   }
 
   return {
     shop: mapShop(shop),
-    products: productRows.map((p) => ({
+    products: visibleProductRows.map((p) => ({
       id: p.id,
       slug: p.slug,
       name: p.name,
@@ -336,15 +264,24 @@ export async function getPublishedShop(slug: string): Promise<{ shop: ShopCard; 
       basePriceKobo: p.basePriceKobo,
       sizes: p.sizes,
       colors: p.colors,
-      coverObjectKey: coverByProduct.get(p.id)?.objectKey ?? null,
+      coverObjectKey: coverByProduct.get(p.id)?.publicObjectKey ?? null,
       coverAltText: coverByProduct.get(p.id)?.altText ?? null,
-      variants: (variantsByProduct.get(p.id) ?? []).map((v) => ({
-        id: v.id,
-        material: v.material,
-        finish: v.finish,
-        priceAddonKobo: v.priceAddonKobo,
-        minimumQuantity: v.minimumQuantity,
-      })),
+      variants: (variantsByProduct.get(p.id) ?? []).flatMap((v) => {
+        const material = v.material?.trim();
+        const finish = v.finish?.trim();
+
+        if (!material || !finish) {
+          return [];
+        }
+
+        return [{
+          id: v.id,
+          material,
+          finish,
+          priceAddonKobo: v.priceAddonKobo,
+          minimumQuantity: v.minimumQuantity,
+        }];
+      }),
     })),
   };
 }
@@ -425,7 +362,10 @@ export async function listDirectoryShops(input: {
   page?: number;
 }): Promise<BrowseDirectoryResult> {
   const page = Math.max(1, input.page ?? 1);
-  const conditions = [eq(printerShop.status, "published")];
+  const conditions = [
+    eq(printerShop.status, "published"),
+    eq(printerShop.visibilityTransition, false),
+  ];
 
   const search = (input.query ?? "").trim();
   const location = (input.location ?? "").trim();
@@ -474,7 +414,11 @@ export async function listDirectoryShops(input: {
           .select()
           .from(products)
           .where(
-            and(eq(products.status, "published"), inArray(products.shopId, shopIds)),
+            and(
+              eq(products.status, "published"),
+              eq(products.visibilityTransition, false),
+              inArray(products.shopId, shopIds),
+            ),
           )
           .orderBy(products.createdAt)
       : [];
@@ -501,14 +445,29 @@ export async function listDirectoryShops(input: {
   const imageRows =
     productIdList.length > 0
       ? await db
-          .select()
+          .select({
+            id: productImages.id,
+            productId: productImages.productId,
+            publicObjectKey: productImages.publicObjectKey,
+            altText: productImages.altText,
+            sortOrder: productImages.sortOrder,
+          })
           .from(productImages)
           .where(inArray(productImages.productId, productIdList))
           .orderBy(productImages.sortOrder)
       : [];
-  const coverByProduct = new Map<string, typeof productImages.$inferSelect | undefined>();
+  const coverByProduct = new Map<
+    string,
+    (typeof imageRows)[number] | undefined
+  >();
   for (const img of imageRows) {
-    if (!coverByProduct.has(img.productId)) coverByProduct.set(img.productId, img);
+    if (
+      img.sortOrder === 0 &&
+      img.publicObjectKey &&
+      !coverByProduct.has(img.productId)
+    ) {
+      coverByProduct.set(img.productId, img);
+    }
   }
 
   const results: DirectoryShop[] = [];
@@ -516,19 +475,32 @@ export async function listDirectoryShops(input: {
     const productsForShop = productByShop.get(shop.id) ?? [];
     let best: {
       product: typeof products.$inferSelect;
-      variant: typeof productVariants.$inferSelect;
+      variant: Omit<typeof productVariants.$inferSelect, "material" | "finish"> & {
+        material: string;
+        finish: string;
+      };
       unitPriceKobo: number;
     } | null = null;
 
     for (const p of productsForShop) {
+      const cover = coverByProduct.get(p.id);
+      if (!cover) continue;
       if (categoryFilter && (!p.category || p.category.toLowerCase() !== categoryFilter.toLowerCase())) {
         continue;
       }
       for (const v of variantsByProduct.get(p.id) ?? []) {
-        if (materialFilter && v.material.trim().toLowerCase() !== materialFilter) continue;
-        if (finishFilter && v.finish.trim().toLowerCase() !== finishFilter) continue;
+        const material = v.material?.trim();
+        const finish = v.finish?.trim();
+
+        if (!material || !finish) continue;
+        if (materialFilter && material.toLowerCase() !== materialFilter) continue;
+        if (finishFilter && finish.toLowerCase() !== finishFilter) continue;
         const unitPrice = unitPriceAtMinQuantity(v, p.basePriceKobo);
-        const candidate = { product: p, variant: v, unitPriceKobo: unitPrice };
+        const candidate = {
+          product: p,
+          variant: { ...v, material, finish },
+          unitPriceKobo: unitPrice,
+        };
         if (!best) {
           best = candidate;
         } else if (candidate.unitPriceKobo < best.unitPriceKobo) {
@@ -568,7 +540,7 @@ export async function listDirectoryShops(input: {
             finish: best.variant.finish,
             unitPriceKobo: best.unitPriceKobo,
             minimumQuantity: best.variant.minimumQuantity,
-            coverObjectKey: cover?.objectKey ?? null,
+            coverObjectKey: cover?.publicObjectKey ?? null,
             coverAltText: cover?.altText ?? null,
           }
         : null,
@@ -672,7 +644,7 @@ export async function listShopProducts(input: {
     const imageRows = await db
       .select({
         productId: productImages.productId,
-        objectKey: productImages.objectKey,
+        objectKey: productImages.publicObjectKey,
         altText: productImages.altText,
         sortOrder: productImages.sortOrder,
       })
@@ -1015,52 +987,6 @@ export async function updateShopSettings(input: UpdateShopSettingsInput): Promis
   }
 }
 
-export type ToggleShopPublishInput = { shopId: string; actorUserId: string; publish: boolean };
-export type ToggleShopPublishResult = { ok: true; status: string } | { ok: false; code: string; message: string };
-
-export async function toggleShopPublish(input: ToggleShopPublishInput): Promise<ToggleShopPublishResult> {
-  const { shopId, actorUserId, publish } = input;
-
-  const [membership] = await db
-    .select()
-    .from(shopMembership)
-    .where(and(eq(shopMembership.shopId, shopId), eq(shopMembership.userId, actorUserId)))
-    .limit(1);
-  if (!membership || membership.role !== "owner") {
-    return { ok: false, code: "shop.forbidden", message: "Only the shop owner can publish or unpublish." };
-  }
-
-  const [shop] = await db.select().from(printerShop).where(eq(printerShop.id, shopId)).limit(1);
-  if (!shop) {
-    return { ok: false, code: "shop.not_found", message: "Shop not found." };
-  }
-  if (shop.status === "suspended") {
-    return { ok: false, code: "shop.suspended", message: "A suspended shop cannot be published or unpublished." };
-  }
-
-  const targetStatus = publish ? "published" : "draft";
-
-  try {
-    await db
-      .update(printerShop)
-      .set({ status: targetStatus, updatedAt: new Date() })
-      .where(eq(printerShop.id, shopId));
-
-    await db.insert(auditEvent).values({
-      id: uuidv4(),
-      actorUserId,
-      targetType: "shop",
-      targetId: shopId,
-      action: publish ? "shop.publish" : "shop.unpublish",
-      detailsJson: null,
-    });
-    return { ok: true, status: targetStatus };
-  } catch (error) {
-    logger.error("shop.publish_toggle_failed", { event: "shop.publish_toggle_failed", error: String(error) });
-    return { ok: false, code: "shop.publish_toggle_failed", message: "Could not update shop status." };
-  }
-}
-
 export type SuspendShopInput = { shopId: string; actorUserId: string; actorRole: ShopMembershipRole | "platform_admin"; action: "suspend" | "reinstate"; reason: string };
 export type SuspendShopResult = { ok: true; status: string } | { ok: false; code: string; message: string };
 
@@ -1078,12 +1004,17 @@ export async function suspendShop(input: SuspendShopInput): Promise<SuspendShopR
     return { ok: false, code: "shop.not_found", message: "Shop not found." };
   }
 
-  const targetStatus = action === "suspend" ? "suspended" : "published";
+  const targetStatus = action === "suspend" ? "suspended" : "draft";
 
   try {
     await db
       .update(printerShop)
-      .set({ status: targetStatus, suspensionReason: action === "suspend" ? reason : null, updatedAt: new Date() })
+      .set({
+        status: targetStatus,
+        visibilityTransition: false,
+        suspensionReason: action === "suspend" ? reason : null,
+        updatedAt: new Date(),
+      })
       .where(eq(printerShop.id, shopId));
 
     await db.insert(auditEvent).values({
@@ -1315,7 +1246,7 @@ export async function getOrderDetail(shopId: string, orderId: string): Promise<O
   const [order] = await db.select().from(orders).where(eq(orders.id, orderId)).limit(1);
   if (!order || order.shopId !== shopId) return null;
 
-  const [customer] = await db
+  await db
     .select({ userId: shopCustomers.userId })
     .from(shopCustomers)
     .where(eq(shopCustomers.id, order.customerId))
@@ -1873,7 +1804,11 @@ export async function createProduct(input: CreateProductInput): Promise<CreatePr
     .from(shopMembership)
     .where(and(eq(shopMembership.shopId, shopId), eq(shopMembership.userId, actorUserId)))
     .limit(1);
-  if (!membership || (membership.role !== "owner" && membership.role !== "manager")) {
+  if (
+    !membership ||
+    membership.status !== "active" ||
+    (membership.role !== "owner" && membership.role !== "manager")
+  ) {
     return err({ code: "shop.forbidden", message: "Only owners and managers can create products." });
   }
 
@@ -1937,10 +1872,10 @@ export async function createProduct(input: CreateProductInput): Promise<CreatePr
         shopId,
         slug,
         name: name.trim(),
-        category: status === "published" ? category : null,
+        category: category ?? null,
         artworkKind: artworkKind ?? null,
         description: description ?? null,
-        basePriceKobo: status === "published" ? basePriceKobo : null,
+        basePriceKobo: basePriceKobo ?? null,
         sizes: sizes ?? null,
         colors: colors ?? null,
         status,
@@ -1973,4 +1908,3 @@ export async function createProduct(input: CreateProductInput): Promise<CreatePr
     return err({ code: "product.create_failed", message: "Could not create product." });
   }
 }
-

@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { gatePrinterExperience, requirePrinterExperience } from "@/lib/printer-gate";
 import { getAuthenticatedUser } from "@/lib/auth/role-resolver";
-import { getCustomerOrderTracking, listCustomerOrders } from "@/lib/services/printer-service";
+import { getCustomerOrderTracking } from "@/lib/services/printer-service";
 import { formatMoney, formatOrderNumber } from "@/lib/format-money";
 
 export default async function OrderTrackingPage({

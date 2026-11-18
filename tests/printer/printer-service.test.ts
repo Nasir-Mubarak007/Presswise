@@ -13,6 +13,7 @@ function createChainable(resolveValue: unknown) {
     limit: vi.fn(() => Promise.resolve(resolveValue)),
     orderBy: vi.fn(() => createChainable(resolveValue)),
     where: vi.fn(() => createChainable(resolveValue)),
+    for: vi.fn(() => createChainable(resolveValue)),
     then: (resolve: (v: unknown) => void) => resolve(resolveValue), // make it awaitable directly
   };
   return obj;
@@ -23,6 +24,7 @@ vi.mock("@/lib/db/client", () => {
     select: vi.fn(() => createChainable([])),
     insert: vi.fn(() => ({
       values: vi.fn(() => ({
+        then: (resolve: (v: unknown) => void) => resolve({}),
         returning: vi.fn(() => Promise.resolve([{ id: "mock-id" }])),
       })),
     })),
@@ -39,12 +41,17 @@ vi.mock("@/lib/db/client", () => {
   return { db: localDb };
 });
 
+vi.mock("@/lib/jobs/printer-assets", () => ({
+  enqueueProductPublication: vi.fn(async () => {}),
+  enqueueShopPublication: vi.fn(async () => {}),
+}));
+
 import { db } from "@/lib/db/client";
+import { enqueueShopPublication } from "@/lib/jobs/printer-assets";
 import {
   createDraftShop,
   publishShop,
   updateShopSettings,
-  toggleShopPublish,
   suspendShop,
   NIGERIAN_STATES,
   listDirectoryShops,
@@ -123,18 +130,37 @@ describe("printer service (mocked db)", () => {
   });
 
   describe("publishShop", () => {
-    it("publishes a draft shop with a published product", async () => {
+    it("queues a ready shop publication", async () => {
       vi.mocked(db.select as any)
         .mockReturnValueOnce(createChainable([{ role: "owner", status: "active" }]))
         .mockReturnValueOnce(
           createChainable([
-            { id: "shop-1", status: "draft", name: "Shop", slug: "shop", state: "Lagos", city: "Ikeja" },
+            {
+              id: "shop-1",
+              status: "draft",
+              name: "Shop",
+              slug: "shop",
+              state: "Lagos",
+              city: "Ikeja",
+              visibilityTransition: false,
+              logoObjectKey: null,
+              logoAltText: null,
+              bannerObjectKey: null,
+              bannerDecorative: false,
+              bannerAltText: null,
+            },
           ])
         )
+        .mockReturnValueOnce(createChainable([]))
+        .mockReturnValueOnce(createChainable([]))
         .mockReturnValueOnce(createChainable([{ productId: "p-1" }]));
+      vi.mocked(db.select as any).mockReturnValueOnce(
+        createChainable([{ status: "queued", retryCount: 0 }]),
+      );
 
       const result = await publishShop({ shopId: "shop-1", actorUserId: "user-1" });
       expect(result.ok).toBe(true);
+      expect(enqueueShopPublication).toHaveBeenCalledOnce();
     });
 
     it("rejects non-owner", async () => {
@@ -159,7 +185,7 @@ describe("printer service (mocked db)", () => {
       const result = await publishShop({ shopId: "shop-1", actorUserId: "user-1" });
       expect(result.ok).toBe(false);
       if (!result.ok) {
-        expect(result.error.code).toBe("shop.suspended");
+        expect(result.error.code).toBe("shop.unavailable");
       }
     });
   });
@@ -192,48 +218,6 @@ describe("printer service (mocked db)", () => {
       expect(result.ok).toBe(false);
       if (!result.ok) {
         expect(result.code).toBe("shop.forbidden");
-      }
-    });
-  });
-
-  describe("toggleShopPublish", () => {
-    it("publishes a draft shop", async () => {
-      vi.mocked(db.select as any)
-        .mockReturnValueOnce(createChainable([{ role: "owner", status: "active" }]))
-        .mockReturnValueOnce(
-          createChainable([
-            { id: "shop-1", status: "draft", name: "Shop", slug: "shop", state: "Lagos", city: "Ikeja" },
-          ])
-        );
-
-      const result = await toggleShopPublish({
-        shopId: "shop-1",
-        actorUserId: "user-1",
-        publish: true,
-      });
-      expect(result.ok).toBe(true);
-      if (result.ok) {
-        expect(result.status).toBe("published");
-      }
-    });
-
-    it("unpublishes a published shop", async () => {
-      vi.mocked(db.select as any)
-        .mockReturnValueOnce(createChainable([{ role: "owner", status: "active" }]))
-        .mockReturnValueOnce(
-          createChainable([
-            { id: "shop-1", status: "published", name: "Shop", slug: "shop", state: "Lagos", city: "Ikeja" },
-          ])
-        );
-
-      const result = await toggleShopPublish({
-        shopId: "shop-1",
-        actorUserId: "user-1",
-        publish: false,
-      });
-      expect(result.ok).toBe(true);
-      if (result.ok) {
-        expect(result.status).toBe("draft");
       }
     });
   });
@@ -271,7 +255,7 @@ describe("printer service (mocked db)", () => {
       }
     });
 
-    it("reinstates a suspended shop as platform admin", async () => {
+    it("returns a reinstated shop to draft so its owner can publish it safely", async () => {
       vi.mocked(db.select as any).mockReturnValueOnce(
         createChainable([{ id: "shop-1", status: "suspended" }])
       );
@@ -285,14 +269,15 @@ describe("printer service (mocked db)", () => {
       });
       expect(result.ok).toBe(true);
       if (result.ok) {
-        expect(result.status).toBe("published");
+        expect(result.status).toBe("draft");
       }
     });
   });
 
   describe("listDirectoryShops", () => {
-    it("returns published shops with pagination", async () => {
-      vi.mocked(db.select as any)
+    it("returns paginated shops and excludes incomplete variant matches", async () => {
+      const selectMock = vi.mocked(db.select as any);
+      selectMock
         .mockReturnValueOnce(
           createChainable([
             {
@@ -312,6 +297,54 @@ describe("printer service (mocked db)", () => {
       const result = await listDirectoryShops({ page: 1 });
       expect(result.page).toBe(1);
       expect(result.pageCount).toBeGreaterThanOrEqual(1);
+
+      selectMock
+        .mockReturnValueOnce(
+          createChainable([
+            {
+              id: "s-1",
+              name: "Shop A",
+              slug: "shop-a",
+              status: "published",
+              state: "Lagos",
+              city: "Ikeja",
+              area: null,
+              tagline: null,
+            },
+          ]),
+        )
+        .mockReturnValueOnce(
+          createChainable([
+            {
+              id: "p-1",
+              shopId: "s-1",
+              slug: "shirt",
+              name: "Shirt",
+              category: "apparel",
+              basePriceKobo: 10000,
+              sizes: null,
+              colors: null,
+            },
+          ]),
+        )
+        .mockReturnValueOnce(
+          createChainable([
+            {
+              id: "v-1",
+              productId: "p-1",
+              material: null,
+              finish: "Matte",
+              priceAddonKobo: 0,
+              minimumQuantity: 1,
+              bulkTiers: null,
+            },
+          ]),
+        )
+        .mockReturnValueOnce(createChainable([]));
+
+      const filtered = await listDirectoryShops({ page: 1, material: "cotton" });
+
+      expect(filtered.shops).toEqual([]);
     });
   });
 });

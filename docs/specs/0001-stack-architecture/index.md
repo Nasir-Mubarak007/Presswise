@@ -5,15 +5,15 @@
 
 ## Summary
 
-Presswise is a print on demand platform for print shops and their customers. Customers upload a photo, customize it on a real product, preview it in 3D, order it, and track it. Printers see an order queue with designs and specs attached, and get paid through commission splits. This spec records the foundational tech stack decision so every later slice builds on real structure. The stack is a single Next.js web app backed by Neon Postgres, with Better Auth for accounts, Cloudflare R2 for files, Resend for email, and Paystack for payments.
+Presswise is a print on demand platform for print shops and their customers. Customers upload a photo, customize it on a real product, preview it in 3D, order it, and track it. Printers see an order queue with designs and specs attached, and get paid through commission splits. This spec records the foundational tech stack decision so every later slice builds on real structure. The stack is a single Next.js web app backed by Neon Postgres, with Better Auth for accounts, Backblaze B2 for files, Resend for email, and Paystack for payments.
 
 ## Decision
 
-**Chosen option**: Option 1: The chosen stack (Next.js, Neon, Drizzle, Better Auth, R2, Resend, Vercel, Railway, Paystack).
+**Chosen option**: Option 1: The chosen stack (Next.js, Neon, Drizzle, Better Auth, Backblaze B2, Resend, Vercel, Railway, Paystack).
 
-The stack is Next.js 16 (App Router, TypeScript, React 19) as a single web app for storefront and dashboard, Neon Postgres with Drizzle ORM for data, Better Auth with its organization plugin for accounts, Cloudflare R2 for file storage, Resend for email, Paystack for payments, Vercel for hosting, Railway for Redis and BullMQ background jobs, Upstash for rate limiting, Sentry for errors, and PostHog for funnels. (basis: your presswise-roadmap.md v2, section 1 technology decisions)
+The stack is Next.js 16 (App Router, TypeScript, React 19) as a single web app for storefront and dashboard, Neon Postgres with Drizzle ORM for data, Better Auth with its organization plugin for accounts, Backblaze B2 S3 compatible object storage for files, Resend for email, Paystack for payments, Vercel for hosting, Railway for Redis and BullMQ background jobs, Upstash for rate limiting, Sentry for errors, and PostHog for funnels. Use one private B2 bucket. Serve customer images through application routes that check publication state, and serve printer previews only after shop membership checks. (basis: your confirmed Backblaze B2 account and one private bucket decision, the AWS SDK S3 client already in the project, and the Backblaze S3 compatible API)
 
-**Implementation skills**: Next.js (`vercel-labs/agent-skills`, `.agents/skills/`) · Drizzle ORM (`oakoss/agent-skills`, `.agents/skills/`) · Better Auth (`better-auth/skills`, `.agents/skills/`) · Cloudflare R2 (`cloudflare/skills`, `.agents/skills/`) · Resend (`resend/resend-skills`, `.agents/skills/`) · Vercel (`vercel-labs/agent-skills`, `.agents/skills/`)
+**Implementation skills**: Next.js (`vercel-labs/agent-skills`, `.agents/skills/`) · Drizzle ORM (`oakoss/agent-skills`, `.agents/skills/`) · Better Auth (`better-auth/skills`, `.agents/skills/`) · AWS SDK (`agents-inc/skills`, `.agents/skills/infra-platform-aws-sdk/`) · Resend (`resend/resend-skills`, `.agents/skills/`) · Vercel (`vercel-labs/agent-skills`, `.agents/skills/`)
 
 ## Proposed stack
 
@@ -26,7 +26,7 @@ The stack is Next.js 16 (App Router, TypeScript, React 19) as a single web app f
 | Primary DB | Neon Postgres | Relational data with ACID guarantees, database branching for tests and preview branches |
 | Query layer | Drizzle ORM + drizzle-kit | Type safe queries over the pg driver, migrations generated from schema |
 | Auth | Better Auth + organization plugin | Email password with verified email, printer companies with admin and employees |
-| File storage | Cloudflare R2 | Object storage for design photos and print files, signed upload URLs |
+| File storage | Backblaze B2 | One private S3 compatible bucket for photos and print files, signed upload URLs; use the free tier for now |
 | Email | Resend | Verification, password reset, invitations |
 | API | Next.js Route Handlers and Server Actions | Server side logic and form actions, Hono deferred |
 | Hosting | Vercel (app) | Managed hosting for the Next.js app |
@@ -54,7 +54,7 @@ The stack is Next.js 16 (App Router, TypeScript, React 19) as a single web app f
 - Paystack split payments handle commission settlement automatically.
 
 **Negative / tradeoffs**:
-- Eight managed services to track credentials, regions, and billing for (Neon, R2, Resend, Paystack, Railway, Upstash, Sentry, PostHog).
+- Eight managed services to track credentials, regions, and billing for (Neon, B2, Resend, Paystack, Railway, Upstash, Sentry, PostHog).
 - Vercel functions have cold starts and short execution limits (about 60 seconds on Hobby, 15 minutes on Pro); print file generation must go to the Railway worker.
 - Better Auth is younger than some alternatives, so security upkeep and email deliverability (SPF, DKIM) are the team's responsibility.
 - Neon scale to zero means the first request after a quiet spell takes about half a second.
@@ -64,7 +64,7 @@ The stack is Next.js 16 (App Router, TypeScript, React 19) as a single web app f
 - VAT is 7.5 percent as a per printer setting under Nigeria Tax Act 2025.
 - The Neon region and the Vercel function region must be resolved together and colocated before the Neon project is created; eu-central-1 (Frankfurt) is suggested for Nigerian users but must be verified against Neon's current region list and against which Vercel region the plan allows. Nigeria to Europe is about 150 ms round trip either way, so keep multi round trip pages static.
 - Background jobs sit behind a `JobQueue` interface with an in memory twin; reconciliation and cleanup can run as idempotent Vercel Cron routes, and the Railway worker deploys only in Phase D. The print file output contract (PDF or PNG, DPI) is owned by the print file feature spec.
-- R2 needs a custom domain public bucket plus a CORS allowlist for the app origin at setup.
+- Browser uploads to B2 need a CORS allowlist for the app origin. A public bucket and public object URLs are not used.
 - The editor is custom pointer code (drag, zoom, text, clamping), not Fabric.js; Fabric.js can be adopted later for rotation, multi layer, or cropping handles.
 - Storefront pages will be static for SEO by making the navbar's account part client side.
 - HEIC photos from iPhones are not converted yet; uploads accept PNG, JPEG, and WebP only.
@@ -77,7 +77,7 @@ The stack is Next.js 16 (App Router, TypeScript, React 19) as a single web app f
 - [ ] Move rate limiting from in memory to Upstash before launch.
 - [ ] Add Content Security Policy and security headers before launch.
 - [ ] Add row level security as a second layer for tenant isolation.
-- [ ] Install the chosen Agent Skills (Next.js, Drizzle, Better Auth, Cloudflare R2, Resend, Vercel) and connect the chosen MCP servers (Neon, Better Auth, Cloudflare R2, Resend, Vercel, Paystack).
+- [ ] Install the chosen Agent Skills (Next.js, Drizzle, Better Auth, AWS SDK, Resend, Vercel) and connect the chosen MCP servers (Neon, Better Auth, Resend, Vercel, Paystack).
 - [ ] Capture stack conventions in root AGENTS.md (framework, ORM, database) and area AGENTS.md files for payments, auth, storage, and email.
 - [ ] Decide the platform fee percentage and who bears Paystack's processing fee.
 - [ ] Start the CAC registration and Paystack KYC clock now; a subaccount needs a verified business and bank account, which blocks Phase C settlement.
@@ -85,6 +85,6 @@ The stack is Next.js 16 (App Router, TypeScript, React 19) as a single web app f
 - [ ] Add a free keep alive ping (Vercel Cron) to reduce Neon cold starts.
 - [ ] Revisit Resend's free tier (about 100 emails per day) before order emails.
 - [ ] Park the print file output contract (PDF or PNG, DPI) for the print file feature spec.
-- [ ] Define the R2 custom domain public bucket and CORS allowlist at setup.
+- [ ] Configure the private B2 bucket, an application key restricted to that bucket, and a CORS allowlist for the app origin.
 - [ ] Add the GitHub Actions workflow (lint, test, build, audit) and the Neon to Vercel branch integration for pull requests.
 - [ ] Pin the Node LTS in `engines` and `.nvmrc`, the same on Vercel and the Railway worker.

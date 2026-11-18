@@ -2,7 +2,6 @@
 
 import { z } from "zod";
 import { headers } from "next/headers";
-import { redirect } from "next/navigation";
 import { gatePrinterExperience } from "@/lib/printer-gate";
 import { getAuthenticatedUser } from "@/lib/auth/role-resolver";
 import { resolveRoleContext } from "@/lib/auth/role-resolver";
