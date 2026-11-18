@@ -10,56 +10,58 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { logger } from "@/lib/log/logger";
 
-type R2Config = {
-  accountId: string;
+type StorageConfig = {
   accessKeyId: string;
   secretAccessKey: string;
-  privateBucket: string;
-  publicBucket: string;
-  publicUrl: string;
+  bucket: string;
+  region: string;
+  endpoint: string;
+  publicUrl: string | null;
 };
 
-type R2Instance = {
+type StorageInstance = {
   client: S3Client;
-  config: R2Config;
+  config: StorageConfig;
 };
 
-let instance: R2Instance | undefined;
+let instance: StorageInstance | undefined;
 
-function required(name: keyof NodeJS.ProcessEnv): string {
+function required(name: string): string {
   const value = process.env[name];
   if (!value) {
-    logger.error("r2.config_missing", { event: "r2.config_missing", missing: [name] });
+    logger.error("storage.config_missing", { event: "storage.config_missing", missing: [name] });
     throw new Error(`Missing required env var: ${name}`);
   }
   return value;
 }
 
-function getPublicBaseUrl(): string {
-  const publicUrl = required("R2_PUBLIC_URL").replace(/\/+$/, "");
-  const parsed = new URL(publicUrl);
+function getPublicBaseUrl(): string | null {
+  const publicUrl = process.env.BACKBLAZE_B2_PUBLIC_URL;
+  if (!publicUrl) return null;
+  const parsed = new URL(publicUrl.replace(/\/+$/, ""));
   if (parsed.protocol !== "https:") {
-    throw new Error("R2_PUBLIC_URL must use HTTPS.");
+    throw new Error("BACKBLAZE_B2_PUBLIC_URL must use HTTPS.");
   }
-  return publicUrl;
+  return parsed.href;
 }
 
-function getR2(): R2Instance {
+function getStorage(): StorageInstance {
   if (instance) return instance;
 
-  const config: R2Config = {
-    accountId: required("R2_ACCOUNT_ID"),
-    accessKeyId: required("R2_ACCESS_KEY_ID"),
-    secretAccessKey: required("R2_SECRET_ACCESS_KEY"),
-    privateBucket: required("R2_PRIVATE_BUCKET"),
-    publicBucket: required("R2_PUBLIC_BUCKET"),
+  const config: StorageConfig = {
+    accessKeyId: required("BACKBLAZE_B2_KEY_ID"),
+    secretAccessKey: required("BACKBLAZE_B2_APPLICATION_KEY"),
+    bucket: required("BACKBLAZE_B2_BUCKET"),
+    region: required("BACKBLAZE_B2_REGION"),
+    endpoint: required("BACKBLAZE_B2_ENDPOINT"),
     publicUrl: getPublicBaseUrl(),
   };
+
   instance = {
     config,
     client: new S3Client({
-      endpoint: `https://${config.accountId}.r2.cloudflarestorage.com`,
-      region: "auto",
+      endpoint: config.endpoint,
+      region: config.region,
       credentials: {
         accessKeyId: config.accessKeyId,
         secretAccessKey: config.secretAccessKey,
@@ -74,11 +76,11 @@ export async function createPrivateUploadUrl(input: {
   contentType: string;
   contentLength: number;
 }): Promise<string> {
-  const { client, config } = getR2();
+  const { client, config } = getStorage();
   return getSignedUrl(
     client,
     new PutObjectCommand({
-      Bucket: config.privateBucket,
+      Bucket: config.bucket,
       Key: input.key,
       ContentType: input.contentType,
       ContentLength: input.contentLength,
@@ -88,10 +90,10 @@ export async function createPrivateUploadUrl(input: {
 }
 
 export async function createPrivateReadUrl(key: string): Promise<string> {
-  const { client, config } = getR2();
+  const { client, config } = getStorage();
   return getSignedUrl(
     client,
-    new GetObjectCommand({ Bucket: config.privateBucket, Key: key }),
+    new GetObjectCommand({ Bucket: config.bucket, Key: key }),
     { expiresIn: 5 * 60 },
   );
 }
@@ -100,10 +102,10 @@ export async function inspectPrivateObject(key: string): Promise<{
   contentLength: number;
   contentType: string | null;
 } | null> {
-  const { client, config } = getR2();
+  const { client, config } = getStorage();
   try {
     const result = await client.send(
-      new HeadObjectCommand({ Bucket: config.privateBucket, Key: key }),
+      new HeadObjectCommand({ Bucket: config.bucket, Key: key }),
     );
     if (typeof result.ContentLength !== "number") {
       throw new Error("Uploaded object has no content length.");
@@ -119,9 +121,9 @@ export async function inspectPrivateObject(key: string): Promise<{
 }
 
 export async function readPrivateObject(key: string): Promise<Uint8Array> {
-  const { client, config } = getR2();
+  const { client, config } = getStorage();
   const result = await client.send(
-    new GetObjectCommand({ Bucket: config.privateBucket, Key: key }),
+    new GetObjectCommand({ Bucket: config.bucket, Key: key }),
   );
   if (!result.Body) throw new Error("Uploaded object has no body.");
   return result.Body.transformToByteArray();
@@ -132,14 +134,14 @@ export async function copyPrivateObject(input: {
   destinationKey: string;
   contentType: string;
 }): Promise<void> {
-  const { client, config } = getR2();
-  const source = `${config.privateBucket}/${input.sourceKey}`
+  const { client, config } = getStorage();
+  const source = `${config.bucket}/${input.sourceKey}`
     .split("/")
     .map(encodeURIComponent)
     .join("/");
   await client.send(
     new CopyObjectCommand({
-      Bucket: config.privateBucket,
+      Bucket: config.bucket,
       Key: input.destinationKey,
       CopySource: source,
       ContentType: input.contentType,
@@ -153,10 +155,10 @@ export async function putPublicObject(input: {
   body: Uint8Array;
   contentType: string;
 }): Promise<void> {
-  const { client, config } = getR2();
+  const { client, config } = getStorage();
   await client.send(
     new PutObjectCommand({
-      Bucket: config.publicBucket,
+      Bucket: config.bucket,
       Key: input.key,
       Body: input.body,
       ContentType: input.contentType,
@@ -166,31 +168,27 @@ export async function putPublicObject(input: {
 }
 
 export async function deletePrivateObject(key: string): Promise<void> {
-  const { client, config } = getR2();
+  const { client, config } = getStorage();
   await client.send(
-    new DeleteObjectCommand({ Bucket: config.privateBucket, Key: key }),
+    new DeleteObjectCommand({ Bucket: config.bucket, Key: key }),
   );
 }
 
 export async function deletePublicObject(key: string): Promise<void> {
-  const { client, config } = getR2();
+  const { client, config } = getStorage();
   await client.send(
-    new DeleteObjectCommand({ Bucket: config.publicBucket, Key: key }),
+    new DeleteObjectCommand({ Bucket: config.bucket, Key: key }),
   );
 }
 
-export function getPublicObjectUrl(key: string): string {
+export function getPublicObjectUrl(key: string): string | undefined {
+  const publicUrl = getPublicBaseUrl();
+  if (!publicUrl) return undefined;
   const encodedKey = key.split("/").map(encodeURIComponent).join("/");
-  return `${getPublicBaseUrl()}/${encodedKey}`;
+  return `${publicUrl}/${encodedKey}`;
 }
 
-export function getR2BucketNames(): {
-  privateBucket: string;
-  publicBucket: string;
-} {
-  const { config } = getR2();
-  return {
-    privateBucket: config.privateBucket,
-    publicBucket: config.publicBucket,
-  };
+export function getStorageBucketName(): string {
+  const { config } = getStorage();
+  return config.bucket;
 }
