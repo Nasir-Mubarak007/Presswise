@@ -7,10 +7,28 @@
   integer,
   json,
   unique,
+  uniqueIndex,
   index,
   bigint,
+  check,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
+
+export type AssetUploadIntentType = "product_photo" | "shop_logo" | "shop_banner";
+export type AssetUploadIntentStatus =
+  | "reserved"
+  | "uploading"
+  | "processing"
+  | "complete"
+  | "failed"
+  | "expired"
+  | "cancelled";
+export type PublicationTransitionStatus =
+  | "queued"
+  | "processing"
+  | "retryable_failed"
+  | "complete";
+export type PublicationTargetState = "draft" | "published" | "archived";
 
 // Better Auth core
 export const user = pgTable("user", {
@@ -128,9 +146,18 @@ export const printerShop = pgTable(
     slug: text("slug").notNull().unique(),
     status: text("status").notNull().default("draft"),
     suspensionReason: text("suspension_reason"),
+    description: text("description"),
     brandColor: text("brand_color"),
     theme: text("theme"),
     tagline: text("tagline"),
+    logoObjectKey: text("logo_object_key"),
+    logoPublicObjectKey: text("logo_public_object_key"),
+    logoAltText: text("logo_alt_text"),
+    bannerObjectKey: text("banner_object_key"),
+    bannerPublicObjectKey: text("banner_public_object_key"),
+    bannerAltText: text("banner_alt_text"),
+    bannerDecorative: boolean("banner_decorative").notNull().default(false),
+    visibilityTransition: boolean("visibility_transition").notNull().default(false),
     state: text("state").notNull(),
     city: text("city").notNull(),
     area: text("area"),
@@ -141,7 +168,12 @@ export const printerShop = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index("printer_shops_slug_idx").on(t.slug), unique("printer_shops_organization_id_unique").on(t.organizationId)],
+  (t) => [
+    index("printer_shops_slug_idx").on(t.slug),
+    index("printer_shops_status_location_idx").on(t.status, t.state, t.city),
+    unique("printer_shops_organization_id_unique").on(t.organizationId),
+    check("printer_shops_description_length_check", sql`${t.description} is null or char_length(${t.description}) <= 2000`),
+  ],
 );
 
 export const shopMembership = pgTable(
@@ -248,6 +280,8 @@ export const products = pgTable(
     slug: text("slug").notNull(),
     name: text("name").notNull(),
     description: text("description"),
+    version: integer("version").notNull().default(1),
+    visibilityTransition: boolean("visibility_transition").notNull().default(false),
     category: text("category"),
     artworkKind: text("artwork_kind"),
     basePriceKobo: bigint("base_price_kobo", { mode: "number" }),
@@ -258,7 +292,16 @@ export const products = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [unique("products_shop_slug_uq").on(t.shopId, t.slug), index("products_shop_active_idx").on(t.shopId)],
+  (t) => [
+    unique("products_shop_slug_uq").on(t.shopId, t.slug),
+    index("products_shop_active_idx").on(t.shopId),
+    index("products_shop_status_updated_idx").on(t.shopId, t.status, t.updatedAt, t.id),
+    index("products_shop_published_name_idx")
+      .on(t.shopId, t.name, t.id)
+      .where(sql`${t.status} = 'published' and ${t.visibilityTransition} = false`),
+    check("products_description_length_check", sql`${t.description} is null or char_length(${t.description}) <= 2000`),
+    check("products_version_positive_check", sql`${t.version} > 0`),
+  ],
 );
 
 export const productVariants = pgTable(
@@ -268,15 +311,20 @@ export const productVariants = pgTable(
     productId: uuid("product_id")
       .notNull()
       .references(() => products.id, { onDelete: "cascade" }),
-    material: text("material").notNull(),
-    finish: text("finish").notNull(),
+    material: text("material"),
+    finish: text("finish"),
     priceAddonKobo: bigint("price_addon_kobo", { mode: "number" }).notNull().default(0),
     minimumQuantity: integer("minimum_quantity").notNull().default(1),
     bulkTiers: json("bulk_tiers"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [unique("product_variants_product_material_finish_uq").on(t.productId, t.material, t.finish)],
+  (t) => [
+    uniqueIndex("product_variants_normalized_material_finish_uq")
+      .on(t.productId, sql`lower(trim(${t.material}))`, sql`lower(trim(${t.finish}))`)
+      .where(sql`${t.material} is not null and ${t.finish} is not null`),
+    index("product_variants_product_idx").on(t.productId),
+  ],
 );
 
 export const designs = pgTable(
@@ -430,6 +478,7 @@ export const productImages = pgTable("product_images", {
     .notNull()
     .references(() => products.id, { onDelete: "cascade" }),
   objectKey: text("object_key").notNull().unique(),
+  publicObjectKey: text("public_object_key").unique(),
   altText: text("alt_text").notNull(),
   sortOrder: integer("sort_order").notNull().default(0),
   attestedByUserId: uuid("attested_by_user_id").references(() => user.id, { onDelete: "set null" }),
@@ -438,25 +487,84 @@ export const productImages = pgTable("product_images", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [unique("product_images_product_sort_uq").on(t.productId, t.sortOrder)]);
 
-export const productImageUploads = pgTable("product_image_uploads", {
+export const assetUploadIntents = pgTable(
+  "asset_upload_intents",
+  {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
   shopId: uuid("shop_id")
     .notNull()
     .references(() => printerShop.id, { onDelete: "cascade" }),
   productId: uuid("product_id")
-    .notNull()
     .references(() => products.id, { onDelete: "cascade" }),
   uploaderId: uuid("uploader_id")
     .notNull()
     .references(() => user.id, { onDelete: "restrict" }),
-  temporaryKey: text("temporary_key").notNull().unique(),
-  contentType: text("content_type").notNull(),
-  sizeBytes: integer("size_bytes").notNull(),
-  altText: text("alt_text").notNull(),
+  assetType: text("asset_type").notNull().default("product_photo"),
+  temporaryObjectKey: text("temporary_object_key").notNull().unique(),
+  expectedContentType: text("expected_content_type").notNull(),
+  expectedSizeBytes: integer("expected_size_bytes").notNull(),
+  altText: text("alt_text"),
+  attestsRealProduct: boolean("attests_real_product").notNull().default(false),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  status: text("status").notNull().default("reserved"),
+  failureCode: text("failure_code"),
+  resultReference: text("result_reference"),
   completedAt: timestamp("completed_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+  },
+  (t) => [
+    index("asset_upload_intents_shop_status_expiry_idx").on(t.shopId, t.status, t.expiresAt),
+    index("asset_upload_intents_product_status_expiry_idx")
+      .on(t.productId, t.status, t.expiresAt)
+      .where(sql`${t.productId} is not null`),
+    check(
+      "asset_upload_intents_type_target_check",
+      sql`(${t.assetType} = 'product_photo' and ${t.productId} is not null) or (${t.assetType} in ('shop_logo', 'shop_banner') and ${t.productId} is null)`,
+    ),
+    check(
+      "asset_upload_intents_status_check",
+      sql`${t.status} in ('reserved', 'uploading', 'processing', 'complete', 'failed', 'expired', 'cancelled')`,
+    ),
+    check(
+      "asset_upload_intents_expected_size_positive_check",
+      sql`${t.expectedSizeBytes} > 0`,
+    ),
+  ],
+);
+
+export const publicationTransitions = pgTable(
+  "publication_transitions",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    shopId: uuid("shop_id").references(() => printerShop.id, { onDelete: "cascade" }),
+    productId: uuid("product_id").references(() => products.id, { onDelete: "cascade" }),
+    targetState: text("target_state").notNull(),
+    status: text("status").notNull().default("queued"),
+    idempotencyKey: text("idempotency_key").notNull().unique(),
+    retryCount: integer("retry_count").notNull().default(0),
+    failureCode: text("failure_code"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("publication_transitions_status_created_idx").on(t.status, t.createdAt),
+    uniqueIndex("publication_transitions_active_shop_uq")
+      .on(t.shopId)
+      .where(sql`${t.shopId} is not null and ${t.status} in ('queued', 'processing', 'retryable_failed')`),
+    uniqueIndex("publication_transitions_active_product_uq")
+      .on(t.productId)
+      .where(sql`${t.productId} is not null and ${t.status} in ('queued', 'processing', 'retryable_failed')`),
+    check(
+      "publication_transitions_one_target_check",
+      sql`(${t.shopId} is not null and ${t.productId} is null) or (${t.shopId} is null and ${t.productId} is not null)`,
+    ),
+    check(
+      "publication_transitions_status_check",
+      sql`${t.status} in ('queued', 'processing', 'retryable_failed', 'complete')`,
+    ),
+    check("publication_transitions_retry_count_check", sql`${t.retryCount} >= 0`),
+  ],
+);
 
 export const refunds = pgTable("refunds", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -486,5 +594,3 @@ export const refundAttempts = pgTable("refund_attempts", {
   verifiedAt: timestamp("verified_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [index("refund_attempts_refund_created_idx").on(t.refundId, t.createdAt)]);
-
-

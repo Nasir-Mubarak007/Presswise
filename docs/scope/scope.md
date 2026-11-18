@@ -27,6 +27,7 @@ _These are recommendations to keep your build orderly, not requirements. Skip an
 | 14 | SEO, internationalization & analytics | Slice 6 | planned |
 | 15 | Printer directory and dashboard | Slice 1 follow on | in-progress |
 | 16 | Storefront branding settings | Slice 1 follow on | planned |
+| 17 | Audit event retention | Slice 1 follow on | planned |
 
 ## Foundations
 
@@ -171,17 +172,17 @@ Build the real printer directory, public shop pages, and private printer operati
 **Done when:** an owner can publish a shop with real product photos, customers can discover and browse it, and shop members can manage orders within their roles without changing `/storefront`.
 
 - [x] Design it (spec): [0005 printer interface](../specs/0005-printer-interface-and-data-model/index.md) · [catalog and public shop pages](../specs/0005-printer-interface-and-data-model/0005-catalog-and-public-shop-pages.md)
-- [~] Build it: /develop printer interface · code in `app/sign-in`, `app/sign-up`, `app/auth/actions.ts`, `app/printer*`, `app/printers`, `app/shops/[slug]`, `components/printer-dashboard-shell.tsx`, `lib/auth/redirects.ts`, `lib/printer-dashboard.ts`, `lib/services/printer-service.ts`, `lib/printer-gate.ts`, `lib/db/schema.ts`
-  - [x] Build directory search and cards, dashboard navigation and overview, order actions, customer tracking, and payout views (AC-4, AC-8, AC-9, AC-10, AC-13).
+- [~] Build it: /develop printer interface · code in `app/sign-in`, `app/sign-up`, `app/auth/actions.ts`, `app/printer*`, `app/api/printer`, `app/printers`, `app/shops/[slug]`, `components/printer-dashboard-shell.tsx`, `lib/auth/redirects.ts`, `lib/printer-dashboard.ts`, `lib/services/printer-service.ts`, `lib/services/printer-asset-service.ts`, `lib/services/printer-publication-service.ts`, `lib/storage`, `lib/jobs`, `lib/printer-gate.ts`, `lib/db/schema.ts`, `scripts/printer-asset-worker.ts`, `tests/printer`
+  - [x] Build directory search and cards, dashboard navigation and order metrics, order actions, customer tracking, and the payout page shell (AC-4, AC-8, AC-10, AC-13 presentation).
   - [x] Build owner account sign up and private shop onboarding with safe dashboard redirects (AC-3, AC-17).
-  - [ ] Build catalog schema, editing, pricing, photo uploads, processing, and safe product actions (AC-1, AC-2, AC-6, AC-7, AC-17, AC-18; AC-CAT-1 through AC-CAT-15; AC-CAT-20 through AC-CAT-22).
-  - [ ] Complete public product pages, shop publication, delivery settings, production routing, team invitations, and role management (AC-5, AC-11, AC-12, AC-13, AC-16, AC-17, AC-19; AC-CAT-13, AC-CAT-16 through AC-CAT-19, AC-CAT-23).
-  - [ ] Verify migrations, Paystack refund confirmation, audit retention, deployment configuration, and end to end behavior before enabling the feature in production (AC-1 through AC-19; AC-CAT-22, AC-CAT-23).
+  - [ ] Build the schema and gated catalog flow, private B2 uploads and image delivery, processing, publication checks, order asset copies and authorization, and safe product actions (AC-1, AC-2, AC-6, AC-7, AC-10, AC-17, AC-18; AC-CAT-1 through AC-CAT-15; AC-CAT-20 through AC-CAT-22).
+  - [ ] Complete public product pages, shop publication, delivery settings, production routing, team invitations, and role management (AC-3, AC-5, AC-11, AC-12, AC-16, AC-17, AC-19; AC-CAT-13, AC-CAT-16 through AC-CAT-19, AC-CAT-23).
+  - [ ] Complete payout values and settled metrics after the checkout decision defines their rules, implement verified Paystack refunds, and verify migrations, deployment configuration, and end to end behavior before enabling the feature in production (AC-9, AC-13 through AC-15; AC-1 through AC-19; AC-CAT-22, AC-CAT-23).
 - [ ] Verify it: /check verify printer interface
 - [ ] Test it: /test printer interface
 - [ ] Review it (fresh model): /check review printer interface
 - [ ] Document it: /document printer interface
-Spec [0005](../specs/0005-printer-interface-and-data-model/index.md) · code in `app/sign-in`, `app/sign-up`, `app/printer*`, `app/shops/[slug]`, `lib/auth/redirects.ts`, `lib/printer-dashboard.ts`, `lib/services/printer-service.ts`, `lib/printer-gate.ts`, `lib/db/schema.ts`
+Spec [0005](../specs/0005-printer-interface-and-data-model/index.md) · code in `app/sign-in`, `app/sign-up`, `app/printer*`, `app/api/printer`, `app/shops/[slug]`, `lib/auth/redirects.ts`, `lib/printer-dashboard.ts`, `lib/services/printer-service.ts`, `lib/services/printer-asset-service.ts`, `lib/services/printer-publication-service.ts`, `lib/storage`, `lib/jobs`, `lib/printer-gate.ts`, `lib/db/schema.ts`, `scripts/printer-asset-worker.ts`, `tests/printer`
 
 ### 16. Storefront branding settings · planned · from spec 0005
 
@@ -191,6 +192,14 @@ Let shop owners and managers edit the public shop description, logo, and banner.
 
 - [ ] Build it: /develop printer storefront branding settings
 Spec [0005 catalog pages](../specs/0005-printer-interface-and-data-model/0005-catalog-and-public-shop-pages.md)
+
+### 17. Audit event retention · needs a decision · planned · from spec 0005
+
+Define and implement a retention policy for audit events without removing records required for financial or security history.
+
+**Done when:** an approved retention period is enforced, and expired audit records are removed or archived safely.
+
+- [ ] Design it (spec): `/architect audit event retention`
 
 ## Deferred
 

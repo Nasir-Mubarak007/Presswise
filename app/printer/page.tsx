@@ -1,5 +1,5 @@
 import PrinterDashboardShell from "@/components/printer-dashboard-shell";
-import { requireDashboardAccess, requireOwnerOrPlatformAdmin } from "@/lib/printer-dashboard";
+import { requireDashboardAccess } from "@/lib/printer-dashboard";
 import { getOverviewMetrics } from "@/lib/services/printer-service";
 import { formatMoney } from "@/lib/format-money";
 

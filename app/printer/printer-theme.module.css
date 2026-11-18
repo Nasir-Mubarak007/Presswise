@@ -1,0 +1,106 @@
+.theme {
+  color-scheme: light;
+  min-height: 100vh;
+  background: var(--printer-color-canvas);
+  color: var(--printer-color-ink);
+  font-family: var(--printer-font-family);
+  --color-surface: #ffffff;
+  --color-ink: #173323;
+  --color-brand: #0b6b4f;
+  --color-lime: #147a4a;
+  --color-amber: #b42318;
+  --printer-color-canvas: #f4f7f2;
+  --printer-color-surface: #ffffff;
+  --printer-color-border: #788b7e;
+  --printer-color-muted: #52685b;
+  --printer-color-body: #33483a;
+  --printer-color-ink: #173323;
+  --printer-color-accent: #0b6b4f;
+  --printer-color-on-accent: #ffffff;
+  --printer-color-success: #147a4a;
+  --printer-color-error: #b42318;
+  --printer-font-family: ui-sans-serif, system-ui, sans-serif;
+  --printer-font-size-xs: 0.694rem;
+  --printer-font-size-sm: 0.833rem;
+  --printer-font-size-base: 1rem;
+  --printer-font-size-lg: 1.2rem;
+  --printer-font-size-xl: 1.44rem;
+  --printer-font-size-2xl: 1.728rem;
+  --printer-font-size-3xl: 2.074rem;
+  --printer-font-weight-regular: 400;
+  --printer-font-weight-medium: 500;
+  --printer-font-weight-bold: 700;
+  --printer-line-height-body: 1.5;
+  --printer-line-height-display: 1.2;
+  --printer-icon-size-sm: 1rem;
+  --printer-icon-size-md: 1.25rem;
+  --printer-icon-size-lg: 1.5rem;
+  --printer-space-1: 0.25rem;
+  --printer-space-2: 0.5rem;
+  --printer-space-3: 0.75rem;
+  --printer-space-4: 1rem;
+  --printer-space-6: 1.5rem;
+  --printer-space-8: 2rem;
+  --printer-space-12: 3rem;
+  --printer-space-16: 4rem;
+  --printer-radius-sm: 0.5rem;
+  --printer-radius-md: 1rem;
+  --printer-radius-full: 9999px;
+  --printer-shadow-panel: 0 1px 3px rgb(23 51 35 / 8%), 0 8px 24px rgb(23 51 35 / 5%);
+  --printer-motion-instant: 80ms;
+  --printer-motion-base: 160ms;
+  --printer-motion-slow: 240ms;
+  --printer-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --printer-ease-spring: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.theme :global(:focus-visible) {
+  outline: 3px solid var(--printer-color-accent);
+  outline-offset: 3px;
+}
+
+.theme[data-theme="light"] {
+  color-scheme: light;
+}
+
+.theme[data-theme="dark"] {
+  color-scheme: dark;
+  --color-surface: #1b2a21;
+  --color-ink: #f3f7f2;
+  --color-brand: #75d6a9;
+  --color-lime: #75d6a9;
+  --color-amber: #ff938b;
+  --printer-color-canvas: #101c16;
+  --printer-color-surface: #1b2a21;
+  --printer-color-border: #718777;
+  --printer-color-muted: #a8b9ac;
+  --printer-color-body: #d7e2d9;
+  --printer-color-ink: #f3f7f2;
+  --printer-color-accent: #75d6a9;
+  --printer-color-on-accent: #10241b;
+  --printer-color-success: #75d6a9;
+  --printer-color-error: #ff938b;
+  --printer-shadow-panel: 0 1px 3px rgb(0 0 0 / 18%), 0 8px 24px rgb(0 0 0 / 12%);
+}
+
+@media (prefers-color-scheme: dark) {
+  .theme:not([data-theme="light"]) {
+    color-scheme: dark;
+    --color-surface: #1b2a21;
+    --color-ink: #f3f7f2;
+    --color-brand: #75d6a9;
+    --color-lime: #75d6a9;
+    --color-amber: #ff938b;
+    --printer-color-canvas: #101c16;
+    --printer-color-surface: #1b2a21;
+    --printer-color-border: #718777;
+    --printer-color-muted: #a8b9ac;
+    --printer-color-body: #d7e2d9;
+    --printer-color-ink: #f3f7f2;
+    --printer-color-accent: #75d6a9;
+    --printer-color-on-accent: #10241b;
+    --printer-color-success: #75d6a9;
+    --printer-color-error: #ff938b;
+    --printer-shadow-panel: 0 1px 3px rgb(0 0 0 / 18%), 0 8px 24px rgb(0 0 0 / 12%);
+  }
+}

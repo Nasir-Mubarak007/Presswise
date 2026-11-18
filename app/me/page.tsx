@@ -1,8 +1,8 @@
-import { auth } from "@/lib/auth/auth";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { ensureCustomerProfile, getAuthenticatedUser, resolveRoleContext } from "@/lib/auth/role-resolver";
 import { listShopsForUser } from "@/lib/services/shop-service";
+import { isPrinterExperienceEnabled } from "@/lib/printer-gate";
 
 export default async function MePage() {
   const user = await getAuthenticatedUser(await headers());
@@ -61,9 +61,20 @@ export default async function MePage() {
         ) : null}
 
         <section>
-          <a href="/shop/new" className="inline-flex items-center rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-surface hover:bg-brand/90">
-            Set up a printer shop
-          </a>
+          {isPrinterExperienceEnabled() ? (
+            <a
+              href={context.activeShopId ? "/printer" : "/printer/onboarding"}
+              className="inline-flex items-center rounded-lg bg-brand px-4 py-2 text-sm font-semibold text-surface hover:bg-brand/90"
+            >
+              {context.activeShopId ? "Open printer dashboard" : "Set up a printer shop"}
+            </a>
+          ) : (
+            <p className="text-sm text-ink/60" role="status">
+              {context.activeShopId
+                ? "Your printer dashboard is temporarily unavailable while the service is being configured."
+                : "Printer shop setup is temporarily unavailable while the service is being configured."}
+            </p>
+          )}
         </section>
       </div>
     </main>

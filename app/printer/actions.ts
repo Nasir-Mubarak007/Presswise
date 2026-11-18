@@ -3,9 +3,11 @@
 import { z } from "zod";
 import { headers } from "next/headers";
 import { gatePrinterExperience } from "@/lib/printer-gate";
-import { getAuthenticatedUser } from "@/lib/auth/role-resolver";
+import {
+  getAuthenticatedUser,
+  resolveRoleContext,
+} from "@/lib/auth/role-resolver";
 import { createDraftShop, publishShop } from "@/lib/services/printer-service";
-import { err, ok } from "@/lib/domain/result";
 
 type ActionFailure = { ok: false; code: string; message: string; fields?: Record<string, string> };
 
@@ -66,11 +68,15 @@ export async function createShopAction(
   return { ok: true, shopId: result.data.shopId };
 }
 
-const publishShopSchema = z.object({ shopId: z.string().uuid("Invalid shop.") });
-
 export async function publishShopAction(
-  formData: FormData,
-): Promise<{ ok: true } | ActionFailure> {
+): Promise<
+  | {
+      ok: true;
+      transitionId: string | null;
+      status: "queued" | "processing" | "retryable_failed" | "complete";
+    }
+  | ActionFailure
+> {
   const gate = gatePrinterExperience();
   if (!gate.ok) {
     return { ok: false, code: gate.code, message: gate.message };
@@ -81,14 +87,17 @@ export async function publishShopAction(
     return { ok: false, code: "auth.not_authenticated", message: "Sign in to publish a shop." };
   }
 
-  const parsed = publishShopSchema.safeParse({ shopId: formData.get("shopId") });
-  if (!parsed.success) {
-    return { ok: false, code: "shop.invalid_input", message: "Invalid shop." };
+  const roleContext = await resolveRoleContext(user.id);
+  if (!roleContext.activeShopId) {
+    return { ok: false, code: "shop.forbidden", message: "Join a shop before publishing it." };
   }
 
-  const result = await publishShop({ shopId: parsed.data.shopId, actorUserId: user.id });
+  const result = await publishShop({
+    shopId: roleContext.activeShopId,
+    actorUserId: user.id,
+  });
   if (!result.ok) {
     return { ok: false, code: result.error.code, message: result.error.message, fields: result.error.fields };
   }
-  return { ok: true };
+  return { ok: true, ...result.data };
 }

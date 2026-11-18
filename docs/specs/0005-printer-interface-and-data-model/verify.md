@@ -49,3 +49,30 @@ AC-3 is covered by the registration and private shop setup steps. AC-8 is covere
 - Browser page errors: none. Browser console errors: none.
 
 AC-3 has partial flow evidence for safe redirection and registration fields, account creation and shop publication still require verification. AC-4 has responsive layout evidence only; published shop cards and filter results are blocked because there are no published shops. AC-8 has dashboard navigation and logout evidence. AC-11 non owner role visibility remains blocked.
+
+## Assigned order asset access · updated 2026-11-17
+
+- [ ] Seed `order_item_assets` rows for a product photo and a submitted design, each linked to an order item → the asset route returns image bytes only when the asset belongs to the requested order → AC-10, AC-CAT-12.
+- [ ] Request an order asset as the owner, manager, assigned staff, unassigned staff, and a member of another shop → only the active shop owner or manager and staff assigned to that order receive image bytes → AC-10, AC-11, AC-17, AC-CAT-12.
+- [ ] Inspect image responses and logs → object keys, signed B2 URLs, and credentials are not exposed → AC-CAT-12.
+
+## Catalog schema migration · updated 2026-11-03
+
+## Database checks
+
+- [x] Apply the catalog migrations to the configured database → `asset_upload_intents` and `publication_transitions` exist, the legacy upload table is removed, and the new catalog columns and indexes are present → AC-CAT-3, AC-CAT-5, AC-CAT-7, AC-CAT-8, AC-CAT-13, AC-CAT-14.
+- [x] Check the configured database upload intent count after conversion → there were no existing upload rows to convert → AC-CAT-8.
+- [ ] On a database with legacy upload intents, apply the migration → each row keeps its identifiers, uploader, product, file metadata, and timestamps; status comes from `completed_at` or `expires_at` → AC-CAT-8, AC-CAT-10.
+- [ ] On a disposable database, add two variants with the same product and case or whitespace normalized material and finish → the second insert is rejected, while draft variants may omit either value → AC-CAT-3, AC-CAT-5.
+- [ ] On a disposable database, add two active publication transitions for one shop or product → the second transition is rejected, and a transition with both or neither target is rejected → AC-CAT-14, AC-CAT-17.
+
+## Commands
+
+- [x] `npm exec -- drizzle-kit check` → migration snapshots are valid.
+- [x] `npm run typecheck` → passes.
+- [x] `npm test -- tests/printer/printer-service.test.ts` → 17 tests pass, including the incomplete variant directory case.
+- [x] `npm run lint -- lib/db/schema.ts lib/services/printer-service.ts` → passes with two existing unused variable warnings.
+
+## Acceptance criteria coverage
+
+These checks cover the schema support for AC-CAT-3, AC-CAT-5, AC-CAT-7, AC-CAT-8, AC-CAT-13, and AC-CAT-14. AC-CAT-10 still needs a migration test with existing upload rows. Upload validation, processing, audit, role checks, and public page behavior remain open for later build steps.

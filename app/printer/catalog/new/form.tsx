@@ -18,7 +18,6 @@ function initialVariant(): Variant {
 
 export default function NewProductForm() {
   const [variants, setVariants] = useState<Variant[]>([initialVariant()]);
-  const [status, setStatus] = useState<"draft" | "published" | "archived">("draft");
 
   const [state, formAction, isPending] = useActionState(createProductAction, null);
   const errorFields = state && !state.ok ? state.fields : undefined;
@@ -184,24 +183,9 @@ export default function NewProductForm() {
             />
             <p className="mt-1 text-xs text-ink/50">Optional. Comma separated.</p>
           </div>
-          <div className="col-span-2">
-            <label className="block text-sm font-medium text-ink mb-1">
-              Status
-            </label>
-            <select
-              name="status"
-              value={status}
-              onChange={(e) => setStatus(e.target.value as "draft" | "published" | "archived")}
-              className={`w-full rounded-lg border px-3 py-2.5 text-ink outline-none focus:border-brand focus:ring-2 focus:ring-brand/20 border-ink/15 bg-surface`}
-            >
-              <option value="draft">Draft (private)</option>
-              <option value="published">Published (public)</option>
-            </select>
-            <p className="mt-1 text-xs text-ink/50">
-              Published products need a base price, category, at least one priced variant, and a
-              cover photo before the shop can go public.
-            </p>
-          </div>
+          <p className="col-span-2 rounded-lg bg-brand/5 px-3 py-2 text-sm text-ink/70">
+            Your product starts as a private draft. Add a real product photo before you publish it.
+          </p>
         </div>
       </section>
 

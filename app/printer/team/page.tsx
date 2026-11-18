@@ -2,7 +2,7 @@ import PrinterDashboardShell from "@/components/printer-dashboard-shell";
 import { requireDashboardAccess, requireOwnerOrPlatformAdmin } from "@/lib/printer-dashboard";
 import { db } from "@/lib/db/client";
 import { shopMembership, user } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 export default async function TeamPage() {
   const ctx = await requireDashboardAccess();

@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { gatePrinterExperience } from "@/lib/printer-gate";
 import { getAuthenticatedUser, resolveRoleContext } from "@/lib/auth/role-resolver";
 import { createProduct } from "@/lib/services/printer-service";
+import { requestProductPublication } from "@/lib/services/printer-publication-service";
 
 
 const VALID_PRODUCT_CATEGORIES = new Set(["caps", "apparel", "bags", "other"]);
@@ -13,6 +14,14 @@ const VALID_PRODUCT_CATEGORIES = new Set(["caps", "apparel", "bags", "other"]);
 export type ProductActionState =
   | { ok: true; productId: string }
   | { ok: false; message: string; fields?: Record<string, string> };
+
+export type PublicationActionState =
+  | {
+      ok: true;
+      transitionId: string | null;
+      status: "queued" | "processing" | "retryable_failed" | "complete";
+    }
+  | { ok: false; message: string; code: string };
 
 const productSchema = z.object({
   name: z.string().min(1, "Product name is required."),
@@ -26,7 +35,6 @@ const productSchema = z.object({
     .transform((val) => Number(val)),
   sizes: z.string().optional().nullable(),
   colors: z.string().optional().nullable(),
-  status: z.enum(["draft", "published", "archived"]),
 });
 
 const variantSchema = z.object({
@@ -59,11 +67,8 @@ export async function createProductAction(
   }
 
   const roleContext = await resolveRoleContext(user.id);
-  const isWriter =
-    roleContext.roles.includes("printer_owner") ||
-    roleContext.roles.includes("printer_staff");
-  if (!isWriter || !roleContext.activeShopId) {
-    return { ok: false, message: "Only shop members can create products." };
+  if (!roleContext.activeShopId) {
+    return { ok: false, message: "Join a shop before creating a product." };
   }
 
   const name = String(formData.get("name") ?? "");
@@ -73,7 +78,6 @@ export async function createProductAction(
   const basePriceRaw = String(formData.get("basePriceKobo") ?? "");
   const sizesRaw = String(formData.get("sizes") ?? "");
   const colorsRaw = String(formData.get("colors") ?? "");
-  const status = String(formData.get("status") ?? "draft");
 
   const parsed = productSchema.safeParse({
     name,
@@ -83,7 +87,6 @@ export async function createProductAction(
     basePriceKobo: basePriceRaw,
     sizes: sizesRaw,
     colors: colorsRaw,
-    status,
   });
   if (!parsed.success) {
     const fields: Record<string, string> = {};
@@ -143,7 +146,7 @@ export async function createProductAction(
     basePriceKobo: parsed.data.basePriceKobo,
     sizes: sizesRaw.trim() ? sizesRaw.split(",").map((s) => s.trim()).filter(Boolean) : null,
     colors: colorsRaw.trim() ? colorsRaw.split(",").map((s) => s.trim()).filter(Boolean) : null,
-    status: parsed.data.status,
+    status: "draft",
     variants: parsedVariants.map((v) => (v as { ok: true; data: z.infer<typeof variantSchema> }).data),
   });
 
@@ -159,5 +162,55 @@ export async function createProductAction(
     return { ok: false, message: result.error.message, fields };
   }
 
-  redirect("/printer/catalog");
+  redirect(`/printer/catalog/new?productId=${result.data.productId}`);
+}
+
+export async function publishProductAction(
+  productId: string,
+): Promise<PublicationActionState> {
+  const gate = gatePrinterExperience();
+  if (!gate.ok) {
+    return { ok: false, code: gate.code, message: gate.message };
+  }
+
+  const user = await getAuthenticatedUser(await headers());
+  if (!user) {
+    return {
+      ok: false,
+      code: "auth.not_authenticated",
+      message: "Sign in to publish this product.",
+    };
+  }
+
+  const parsed = z.string().uuid().safeParse(productId);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      code: "product.invalid_input",
+      message: "Invalid product.",
+    };
+  }
+
+  const roleContext = await resolveRoleContext(user.id);
+  if (!roleContext.activeShopId) {
+    return {
+      ok: false,
+      code: "shop.forbidden",
+      message: "Join a shop before publishing a product.",
+    };
+  }
+
+  const result = await requestProductPublication({
+    shopId: roleContext.activeShopId,
+    actorUserId: user.id,
+    productId: parsed.data,
+  });
+  if (!result.ok) {
+    return {
+      ok: false,
+      code: result.error.code,
+      message: result.error.message,
+    };
+  }
+  return { ok: true, ...result.data };
 }

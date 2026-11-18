@@ -63,11 +63,17 @@ Keep `/storefront` unchanged and add the public printer directory, public shop p
 
 ## Rationale
 
-Option 3 follows the explicit boundary for `/storefront` while giving printers a real catalog and private operations experience. It also honors the accepted shared identity and organization model, and reuses the repository's Next.js, Drizzle, Better Auth, Neon, R2, and Paystack choices rather than adding another service. The add alongside approach allows existing data to be preserved while new pages stay unavailable until their migration and access checks are verified. The schema work replaces the earlier model proposal because the printer interface requires new publication, image, assignment, and refund data (basis: `AGENTS.md`, `docs/specs/0001-stack-architecture/index.md`, `docs/specs/0003-customer-printer-accounts.md`, `docs/specs/0004-shared-data-model.md`, `.env.example`, and the installed Drizzle, Better Auth, Next.js 16, and Neon skills).
+Option 3 follows the explicit boundary for `/storefront` while giving printers a real catalog and private operations experience. It also honors the accepted shared identity and organization model, and reuses the repository's Next.js, Drizzle, Better Auth, Neon, private Backblaze B2, and Paystack choices rather than adding another service. The single private bucket keeps originals and optimized derivatives inaccessible directly. Customer image routes check publication state, and printer preview routes check active shop membership before streaming bytes. The cost is application bandwidth and image request latency, with no shared cache so later requests stop immediately after publication or membership changes. The add alongside approach allows existing data to be preserved while new pages stay unavailable until their migration and access checks are verified. The schema work replaces the earlier model proposal because the printer interface requires new publication, image, assignment, and refund data (basis: `AGENTS.md`, `docs/specs/0001-stack-architecture/index.md`, `docs/specs/0003-customer-printer-accounts.md`, `docs/specs/0004-shared-data-model.md`, `.env.example`, and the installed Drizzle, Better Auth, Next.js 16, and Neon skills).
 
 The visual direction uses the existing Presswise design system as the foundation. The reviewed Mobbin printer dashboard patterns inform information hierarchy and navigation; Printful and Printify inform the product catalog and storefront presentation; Google Maps informs location selection and filtering. Those references are inspiration only, not a component or brand to copy. The proposed printer navigation keeps daily operations prominent and moves storefront management into its own page (basis: `design-system/Presswise — Design System.md`, Mobbin, Printful, Printify, Google Maps).
 
 Real printer photos, required alt text, explicit product publication, and variant sourced materials and finishes make the storefront data trustworthy. A server checked role boundary, order snapshots, audit records, full refunds only, verified provider status, and a recovery status check protect the sensitive parts of the workflow. The manual refund status check is the chosen recovery path when a webhook is delayed or lost; it reads the existing provider refund and never creates another request (basis: `docs/specs/0003-customer-printer-accounts.md`, least privilege access control, audit trails for money operations, idempotency for payment operations, staged migration practice, and feature gated rollout).
+
+### Order asset snapshots
+
+The order image route needs a stable record for each product photo or submitted design file. The chosen shape is an `order_item_assets` row with an immutable private B2 copy. This keeps the image available when catalog photos change, and lets the server authorize an opaque asset ID through its order. Keeping asset keys in `designSnapshot` would avoid a table, but it would make validation and order membership checks depend on unstructured JSON, and could leave orders pointing at files that later change or disappear. The tradeoff is additional private storage and cleanup work. The separate checkout decision must create these rows when an order is submitted (basis: `lib/db/schema.ts`, the AC-10 order access contract, and immutable order snapshot practice).
+
+The alternatives were an order asset table with private copies, or references stored in `designSnapshot`. The table provides a foreign key to the order item and stable file ownership, while its cost is extra B2 storage and cleanup. JSON references reduce schema work, but cannot enforce that relationship and may point to a catalog file that later changes or disappears.
 
 ## References
 
@@ -79,7 +85,7 @@ Real printer photos, required alt text, explicit product publication, and varian
 * `docs/specs/0003-customer-printer-accounts.md`, shared identity, organization membership, and audit expectations.
 * `docs/specs/0004-shared-data-model.md`, the existing data model being replaced and extended.
 * `lib/db/schema.ts`, the existing relational schema.
-* `.env.example`, the configured database, R2, email, and payment variables.
+* `.env.example`, the configured database, private B2, email, and payment variables.
 * `design-system/Presswise — Design System.md`, the visual foundation.
 * `drizzle-orm-patterns`, `.agents/skills/drizzle-orm-patterns/`.
 * `organization-best-practices`, `.agents/skills/organization-best-practices/`.
